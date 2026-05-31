@@ -80,25 +80,54 @@ def extract_page(html, slug):
         if t and t not in {"IL MODELS","IL MODEL","HOME","MODELS"}:
             name = t
 
-    # Stats
-    stats = ""
-    s = re.search(
-        r'Height[\s:]*([0-9.,]+\s*(?:cm)?)[^\n|]{0,30}\|[^\n|]{0,10}'
-        r'(?:BUST|Bust)[\s:]*(\d+)[^\n|]{0,30}\|[^\n|]{0,10}'
-        r'(?:WAIST|Waist)[\s:]*(\d+)[^\n|]{0,30}\|[^\n|]{0,10}'
-        r'(?:HIPS|Hips)[\s:]*(\d+)[^\n|]{0,30}\|[^\n|]{0,10}'
-        r'(?:Shoes?)[\s:]*(\d+[.,]?\d*)', html, re.I)
-    if s:
-        stats = f"{s[1].strip()} | {s[2]}/{s[3]}/{s[4]} | Shoes {s[5]}"
-    else:
-        parts = []
-        for lbl, pat in [("H", r'Height[\s:]*([0-9.,]+\s*cm?)'),
-                          ("B/W/H", r'Bust[\s:]*(\d+)[^\n|]{0,20}\|[^\n|]{0,10}Waist[\s:]*(\d+)[^\n|]{0,20}\|[^\n|]{0,10}Hips[\s:]*(\d+)'),
-                          ("Shirt", r'SHIRT[\s:]*([A-Z]+)'),
-                          ("Shoes", r'Shoes?[\s:]*(\d+[.,]?\d*)')]:
-            mf = re.search(pat, html, re.I)
-            if mf: parts.append(f"{lbl}: {mf[1].strip()}")
-        stats = " · ".join(parts)
+    # Stats — extract all available fields with multiple pattern attempts
+    found = {}
+
+    # Height
+    for pat in [r'[Hh]eight[\s:]*([0-9.,]+\s*(?:cm)?)', r'"height"\s*:\s*"([^"]+)"']:
+        m = re.search(pat, html)
+        if m: found["Height"] = m.group(1).strip().rstrip(".,"); break
+
+    # Bust / Waist / Hips — try individual, then combined B/W/H
+    for pat in [r'[Bb]ust[\s:]*(\d+)', r'"bust"\s*:\s*"?(\d+)"?']:
+        m = re.search(pat, html)
+        if m: found["Bust"] = m.group(1); break
+    for pat in [r'[Ww]aist[\s:]*(\d+)', r'"waist"\s*:\s*"?(\d+)"?']:
+        m = re.search(pat, html)
+        if m: found["Waist"] = m.group(1); break
+    for pat in [r'[Hh]ips[\s:]*(\d+)', r'"hips"\s*:\s*"?(\d+)"?']:
+        m = re.search(pat, html)
+        if m: found["Hips"] = m.group(1); break
+    # Combined B/W/H fallback
+    if not all(k in found for k in ("Bust","Waist","Hips")):
+        m = re.search(r'B[/\s]?W[/\s]?H[\s:]*(\d+)[/\s]+(\d+)[/\s]+(\d+)', html, re.I)
+        if m:
+            found.setdefault("Bust",  m.group(1))
+            found.setdefault("Waist", m.group(2))
+            found.setdefault("Hips",  m.group(3))
+
+    # Other fields
+    extra_fields = [
+        ("Bra",           [r'[Bb]ra[\s:]*([A-Za-z0-9/]+)', r'"bra"\s*:\s*"([^"]+)"']),
+        ("Shirt",         [r'[Ss]hirt[\s:]*([A-Za-z0-9]+)', r'"shirt"\s*:\s*"([^"]+)"']),
+        ("Pants",         [r'[Pp]ants[\s:]*(\d+)', r'"pants"\s*:\s*"?(\d+)"?']),
+        ("Shoe",          [r'[Ss]hoe[s]?[\s:]*(\d+[.,]?\d*)', r'"shoe[s]?"\s*:\s*"?(\d+)"?']),
+        ("Eye Color",     [r'[Ee]ye\s*[Cc]olor[\s:]*(\w+)', r'"eyeColor"\s*:\s*"([^"]+)"']),
+        ("Hair Color",    [r'[Hh]air\s*[Cc]olor[\s:]*(\w+)', r'"hairColor"\s*:\s*"([^"]+)"']),
+        ("Tattoos",       [r'[Tt]attoos?[\s:]*(\w+)']),
+        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?[\s:]*([0-9A-Za-z+\-]+)']),
+    ]
+    for lbl, patterns in extra_fields:
+        for pat in patterns:
+            m = re.search(pat, html)
+            if m:
+                found[lbl] = m.group(1).strip().rstrip(".,")
+                break
+
+    # Build ordered stats string
+    order = ["Height","Bust","Waist","Hips","Bra","Shirt","Pants","Shoe","Eye Color","Hair Color","Tattoos","Ear Piercings"]
+    parts = [f"{k}  {found[k]}" for k in order if k in found]
+    stats = "  |  ".join(parts)
 
     # Instagram
     insta = ""
@@ -208,7 +237,7 @@ def build_pdf(models, title=""):
     DARK2 = HexColor("#161616")
 
     HDR_H  = 22 * mm   # header strip
-    INFO_H = 68 * mm   # info strip at bottom
+    INFO_H = 80 * mm   # info strip at bottom
     PHOTO_H = H - HDR_H - INFO_H   # photo fills the middle
 
     buf = io.BytesIO()
@@ -288,40 +317,50 @@ def build_pdf(models, title=""):
         c.setFillColor(WHITE)
         c.drawString(M, INFO_H - 13*mm, name[:32])
 
-        # Stats — split into nice lines
+        # Stats — split into rows of 4 items each
         raw = model.get("stats", "")
-        stat_items = [s.strip() for s in re.split(r'[|·]', raw) if s.strip()]
-        line1, line2 = [], []
-        mid = (len(stat_items) + 1) // 2
-        for i, item in enumerate(stat_items):
-            (line1 if i < mid else line2).append(item)
+        stat_items = [s.strip() for s in raw.split("|") if s.strip()]
+        PER_ROW = 4
+        rows = [stat_items[i:i+PER_ROW] for i in range(0, len(stat_items), PER_ROW)]
 
-        c.setFont("Helvetica", 8.5)
+        c.setFont("Helvetica", 8)
         c.setFillColor(SILVER)
-        sep = "   |   "
-        if line1:
-            c.drawString(M, INFO_H - 21*mm, sep.join(line1))
-        if line2:
-            c.drawString(M, INFO_H - 26.5*mm, sep.join(line2))
+        stat_y = INFO_H - 21*mm
+        for row in rows[:4]:
+            line = "   |   ".join(row)
+            c.drawString(M, stat_y, line)
+            stat_y -= 5*mm
 
         # Instagram button
         insta = model.get("insta", "")
         if insta:
             handle = insta.lstrip("@")
-            btn_w  = min(50*mm, len(handle)*4*mm + 20*mm)
-            btn_h  = 9*mm
+            btn_w  = 70*mm
+            btn_h  = 10*mm
             btn_x  = M
-            btn_y  = 8*mm
-            # Shadow
-            c.setFillColor(HexColor("#6B4F1E"))
-            c.roundRect(btn_x+0.8*mm, btn_y-0.8*mm, btn_w, btn_h, 2*mm, fill=1, stroke=0)
-            # Button
-            c.setFillColor(GOLD)
-            c.roundRect(btn_x, btn_y, btn_w, btn_h, 2*mm, fill=1, stroke=0)
+            btn_y  = 7*mm
+
+            # Instagram pink/purple background
+            c.setFillColor(HexColor("#C13584"))
+            c.roundRect(btn_x, btn_y, btn_w, btn_h, 2.5*mm, fill=1, stroke=0)
+
+            # Camera icon (simple rounded square outline)
+            ix = btn_x + 3.8*mm
+            iy = btn_y + 2.3*mm
+            isz = 5.4*mm
+            c.setStrokeColor(WHITE)
+            c.setLineWidth(0.7)
+            c.roundRect(ix, iy, isz, isz, 1*mm, fill=0, stroke=1)
+            c.setLineWidth(0.55)
+            c.circle(ix + isz/2, iy + isz/2, 1.5*mm, fill=0, stroke=1)
+            c.setFillColor(WHITE)
+            c.circle(ix + isz - 1.2*mm, iy + isz - 1.2*mm, 0.45*mm, fill=1, stroke=0)
+
             # Label
             c.setFont("Helvetica-Bold", 9)
-            c.setFillColor(HexColor("#0A0A0A"))
-            c.drawCentredString(btn_x + btn_w/2, btn_y + 2.8*mm, f"@ {handle}")
+            c.setFillColor(WHITE)
+            c.drawString(btn_x + 12*mm, btn_y + 3.3*mm, f"Instagram   @{handle}")
+
             # Link
             c.linkURL(f"https://instagram.com/{handle}",
                       (btn_x, btn_y, btn_x + btn_w, btn_y + btn_h))
