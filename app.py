@@ -195,100 +195,146 @@ def fetch_img(url):
     except: pass
     return None
 
-def build_pdf(models):
-    W, H   = A4
-    M      = 14 * mm
-    COLS   = 2
-    GAP    = 8  * mm
-    CW     = (W - 2*M - GAP) / COLS
-    PH     = CW * 1.35          # photo height (portrait ratio)
-    CARD_H = PH + 32 * mm       # photo + info strip
+def build_pdf(models, title=""):
+    W, H  = A4          # 595 x 842 pts
+    M     = 10 * mm
 
-    BG     = HexColor("#0A0A0A")
-    GOLD   = HexColor("#C9A96E")
-    WHITE  = HexColor("#FFFFFF")
-    SILVER = HexColor("#AAAAAA")
-    CARD   = HexColor("#181818")
-    BORDER = HexColor("#2A2A2A")
+    BG    = HexColor("#0A0A0A")
+    GOLD  = HexColor("#C9A96E")
+    GOLD2 = HexColor("#E8D5A3")
+    WHITE = HexColor("#FFFFFF")
+    SILVER= HexColor("#AAAAAA")
+    DARK  = HexColor("#0F0F0F")
+    DARK2 = HexColor("#161616")
+
+    HDR_H  = 22 * mm   # header strip
+    INFO_H = 68 * mm   # info strip at bottom
+    PHOTO_H = H - HDR_H - INFO_H   # photo fills the middle
 
     buf = io.BytesIO()
     c   = rl.Canvas(buf, pagesize=A4)
-    c.setTitle("IL Models")
+    c.setTitle("IL Models Newsletter")
 
-    def new_page():
-        c.setFillColor(BG); c.rect(0, 0, W, H, fill=1, stroke=0)
-        # Header
-        c.setFillColor(GOLD);  c.rect(0, H-1.5*mm, W, 1.5*mm, fill=1, stroke=0)
-        c.setFillColor(HexColor("#111")); c.rect(0, H-20*mm, W, 20*mm, fill=1, stroke=0)
-        c.setFont("Helvetica-Bold", 16); c.setFillColor(WHITE)
-        c.drawString(M, H-13*mm, "IL MODELS")
-        c.setFont("Helvetica", 8); c.setFillColor(SILVER)
-        c.drawRightString(W-M, H-13*mm, time.strftime("Newsletter · %B %Y"))
-        c.setFillColor(GOLD); c.rect(0, H-20.5*mm, W, 0.4*mm, fill=1, stroke=0)
-        # Footer
-        c.setFillColor(HexColor("#111")); c.rect(0, 0, W, 10*mm, fill=1, stroke=0)
-        c.setFillColor(GOLD); c.rect(0, 10*mm, W, 0.4*mm, fill=1, stroke=0)
-        c.setFont("Helvetica", 7); c.setFillColor(SILVER)
-        c.drawCentredString(W/2, 3.5*mm, "ilmodel.com")
+    def draw_page(model):
+        # ── Full background ──
+        c.setFillColor(BG)
+        c.rect(0, 0, W, H, fill=1, stroke=0)
 
-    def draw_card(model, x, y):
-        # Card bg
-        c.setFillColor(CARD); c.rect(x, y, CW, CARD_H, fill=1, stroke=0)
-        c.setStrokeColor(BORDER); c.setLineWidth(0.3); c.rect(x, y, CW, CARD_H, fill=0, stroke=1)
-        c.setFillColor(GOLD); c.rect(x, y+CARD_H-1.2*mm, CW, 1.2*mm, fill=1, stroke=0)
+        # ── HEADER ──
+        # Gold top bar (3mm)
+        c.setFillColor(GOLD)
+        c.rect(0, H - 3*mm, W, 3*mm, fill=1, stroke=0)
+        # Header background
+        c.setFillColor(DARK)
+        c.rect(0, H - HDR_H, W, HDR_H - 3*mm, fill=1, stroke=0)
+        # Gold bottom line of header
+        c.setFillColor(GOLD)
+        c.rect(0, H - HDR_H, W, 0.6*mm, fill=1, stroke=0)
 
-        # Photo
-        px, py = x+2*mm, y+CARD_H-PH-2*mm
-        img = fetch_img(model.get("photo_url") or model.get("thumb",""))
+        # Logo — "IL · MODELS"
+        logo_y = H - HDR_H + 6*mm
+        c.setFont("Helvetica-Bold", 17)
+        c.setFillColor(WHITE)
+        c.drawString(M, logo_y, "IL")
+        c.setFillColor(GOLD)
+        c.setFont("Helvetica-Bold", 17)
+        c.drawString(M + 19, logo_y, "·")
+        c.setFillColor(WHITE)
+        c.drawString(M + 28, logo_y, "MODELS")
+
+        # Custom title on the right
+        hdr_right = title.upper() if title else time.strftime("Newsletter  ·  %B %Y").upper()
+        c.setFont("Helvetica", 8)
+        c.setFillColor(SILVER)
+        c.drawRightString(W - M, logo_y, hdr_right)
+
+        # ── PHOTO ──
+        py = INFO_H
+        img = fetch_img(model.get("photo_url") or model.get("thumb", ""))
         if img:
-            c.drawImage(ImageReader(img), px, py, width=CW-4*mm, height=PH, preserveAspectRatio=True, anchor="n", mask="auto")
+            c.drawImage(ImageReader(img), 0, py, width=W, height=PHOTO_H,
+                        preserveAspectRatio=True, anchor="n", mask="auto")
         else:
-            c.setFillColor(HexColor("#222")); c.rect(px, py, CW-4*mm, PH, fill=1, stroke=0)
-            c.setFillColor(SILVER); c.setFont("Helvetica",8); c.drawCentredString(x+CW/2, y+CARD_H/2, "No photo")
+            c.setFillColor(HexColor("#1A1A1A"))
+            c.rect(0, py, W, PHOTO_H, fill=1, stroke=0)
+            c.setFillColor(SILVER); c.setFont("Helvetica", 14)
+            c.drawCentredString(W/2, py + PHOTO_H/2, "No photo")
+
+        # Gradient overlay at photo bottom (dark fade into info strip)
+        steps = 18
+        for i in range(steps):
+            alpha = i / steps
+            grey = int(10 + alpha * 5)
+            c.setFillColor(HexColor(f"#{grey:02x}{grey:02x}{grey:02x}"))
+            c.setFillAlpha(alpha * 0.7)
+            band_h = 18 * mm / steps
+            c.rect(0, py + i * band_h, W, band_h + 0.5, fill=1, stroke=0)
+        c.setFillAlpha(1.0)
+
+        # Clickable photo → model page
+        url = model.get("url", "")
+        if url:
+            c.linkURL(url, (0, py, W, py + PHOTO_H))
+
+        # ── INFO STRIP ──
+        c.setFillColor(DARK2)
+        c.rect(0, 0, W, INFO_H, fill=1, stroke=0)
+        c.setFillColor(GOLD)
+        c.rect(0, INFO_H - 0.5*mm, W, 0.5*mm, fill=1, stroke=0)
 
         # Name
-        ty = py - 5*mm
-        c.setFont("Helvetica-Bold", 10); c.setFillColor(WHITE)
-        c.drawString(x+3*mm, ty, model.get("name","")[:28])
+        name = model.get("name", "")
+        c.setFont("Helvetica-Bold", 22)
+        c.setFillColor(WHITE)
+        c.drawString(M, INFO_H - 13*mm, name[:32])
 
-        # Stats
-        stats = model.get("stats","")
-        if stats:
-            ty -= 4*mm; c.setFont("Helvetica", 7.5); c.setFillColor(SILVER)
-            c.drawString(x+3*mm, ty, stats[:46])
-            if len(stats) > 46:
-                ty -= 3.5*mm; c.drawString(x+3*mm, ty, stats[46:88])
+        # Stats — split into nice lines
+        raw = model.get("stats", "")
+        stat_items = [s.strip() for s in re.split(r'[|·]', raw) if s.strip()]
+        line1, line2 = [], []
+        mid = (len(stat_items) + 1) // 2
+        for i, item in enumerate(stat_items):
+            (line1 if i < mid else line2).append(item)
 
-        # Instagram
-        insta = model.get("insta","")
+        c.setFont("Helvetica", 8.5)
+        c.setFillColor(SILVER)
+        sep = "   |   "
+        if line1:
+            c.drawString(M, INFO_H - 21*mm, sep.join(line1))
+        if line2:
+            c.drawString(M, INFO_H - 26.5*mm, sep.join(line2))
+
+        # Instagram button
+        insta = model.get("insta", "")
         if insta:
-            ty -= 4*mm; c.setFont("Helvetica", 8); c.setFillColor(GOLD)
-            c.drawString(x+3*mm, ty, insta)
-            ig_url = f"https://instagram.com/{insta.lstrip('@')}"
-            c.linkURL(ig_url, (x+3*mm, ty-1*mm, x+3*mm+50*mm, ty+4*mm))
+            handle = insta.lstrip("@")
+            btn_w  = min(50*mm, len(handle)*4*mm + 20*mm)
+            btn_h  = 9*mm
+            btn_x  = M
+            btn_y  = 8*mm
+            # Shadow
+            c.setFillColor(HexColor("#6B4F1E"))
+            c.roundRect(btn_x+0.8*mm, btn_y-0.8*mm, btn_w, btn_h, 2*mm, fill=1, stroke=0)
+            # Button
+            c.setFillColor(GOLD)
+            c.roundRect(btn_x, btn_y, btn_w, btn_h, 2*mm, fill=1, stroke=0)
+            # Label
+            c.setFont("Helvetica-Bold", 9)
+            c.setFillColor(HexColor("#0A0A0A"))
+            c.drawCentredString(btn_x + btn_w/2, btn_y + 2.8*mm, f"@ {handle}")
+            # Link
+            c.linkURL(f"https://instagram.com/{handle}",
+                      (btn_x, btn_y, btn_x + btn_w, btn_y + btn_h))
 
-        # Clickable card → model page
-        url = model.get("url","")
-        if url: c.linkURL(url, (x, y, x+CW, y+CARD_H))
+        # Page URL hint bottom-right
+        c.setFont("Helvetica", 7)
+        c.setFillColor(HexColor("#444"))
+        c.drawRightString(W - M, 3.5*mm, "ilmodel.com")
 
-    # Layout
-    CONTENT_TOP = H - 22*mm
-    CONTENT_BOT = 12*mm
-    PER_ROW_H   = CARD_H + 8*mm
-    ROWS_PER_PAGE = max(1, int((CONTENT_TOP - CONTENT_BOT) / PER_ROW_H))
-
-    per_page = COLS * ROWS_PER_PAGE
-    pages    = [models[i:i+per_page] for i in range(0, len(models), per_page)]
-
-    for pi, page_models in enumerate(pages):
-        new_page()
-        for i, model in enumerate(page_models):
-            col = i % COLS
-            row = i // COLS
-            x   = M + col * (CW + GAP)
-            y   = CONTENT_TOP - CARD_H - row * PER_ROW_H
-            draw_card(model, x, y)
-        if pi < len(pages)-1: c.showPage()
+    for i, model in enumerate(models):
+        draw_page(model)
+        if i < len(models) - 1:
+            c.showPage()
 
     c.save(); buf.seek(0); return buf
 
@@ -337,10 +383,11 @@ def api_model_photos(slug):
 def api_generate():
     data   = request.get_json(force=True) or {}
     models = data.get("models", [])
+    title  = data.get("title", "")
     if not models:
         return jsonify({"error": "No models"}), 400
     try:
-        pdf  = build_pdf(models)
+        pdf  = build_pdf(models, title=title)
         resp = make_response(pdf.read())
         resp.headers["Content-Type"]        = "application/pdf"
         resp.headers["Content-Disposition"] = f'attachment; filename="il-models-{time.strftime("%Y%m%d")}.pdf"'
