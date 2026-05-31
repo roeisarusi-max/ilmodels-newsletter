@@ -21,7 +21,7 @@ try: from PIL import Image as PILImage; PIL_OK = True
 except ImportError: _install("pillow"); from PIL import Image as PILImage; PIL_OK = True
 
 # ── App ────────────────────────────────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')
 PORT = int(os.environ.get("PORT", 8765))
 
 # ── Scraping config ────────────────────────────────────────────────────────────
