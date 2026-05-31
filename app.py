@@ -60,7 +60,7 @@ INFLUENCERS = [
 ]
 
 # ── In-memory cache ────────────────────────────────────────────────────────────
-_cache       = None   # {"data": {CAT: [model,...]}, "fetched_at": "..."}
+_cache       = None
 _fetch_state = {"running": False, "done": 0, "total": 0}
 _fetch_lock  = threading.Lock()
 
@@ -80,65 +80,84 @@ def extract_page(html, slug):
         if t and t not in {"IL MODELS","IL MODEL","HOME","MODELS"}:
             name = t
 
-    # Stats — extract all available fields with multiple pattern attempts
-    found = {}
+    # ── Stats: grab the raw line of text from the page ──────────────────────
+    # Strategy: find any text block between HTML tags that contains measurement
+    # keywords and pipe separators — that IS the stats line as typed on the site.
+    stats = ""
 
-    # Height
-    for pat in [r'[Hh]eight[\s:]*([0-9.,]+\s*(?:cm)?)', r'"height"\s*:\s*"([^"]+)"']:
-        m = re.search(pat, html)
-        if m: found["Height"] = m.group(1).strip().rstrip(".,"); break
+    MEAS_KW = r'(?:Height|BUST|Bust|Waist|WAIST|Hips|HIPS|Shoe|Hair|Eyes?)'
 
-    # Bust / Waist / Hips — try individual, then combined B/W/H
-    for pat in [r'[Bb]ust[\s:]*(\d+)', r'"bust"\s*:\s*"?(\d+)"?']:
-        m = re.search(pat, html)
-        if m: found["Bust"] = m.group(1); break
-    for pat in [r'[Ww]aist[\s:]*(\d+)', r'"waist"\s*:\s*"?(\d+)"?']:
-        m = re.search(pat, html)
-        if m: found["Waist"] = m.group(1); break
-    for pat in [r'[Hh]ips[\s:]*(\d+)', r'"hips"\s*:\s*"?(\d+)"?']:
-        m = re.search(pat, html)
-        if m: found["Hips"] = m.group(1); break
-    # Combined B/W/H fallback
-    if not all(k in found for k in ("Bust","Waist","Hips")):
-        m = re.search(r'B[/\s]?W[/\s]?H[\s:]*(\d+)[/\s]+(\d+)[/\s]+(\d+)', html, re.I)
-        if m:
-            found.setdefault("Bust",  m.group(1))
-            found.setdefault("Waist", m.group(2))
-            found.setdefault("Hips",  m.group(3))
+    for raw_pat in [
+        r'>\s*(' + MEAS_KW + r'[^<\n]{3,500}\|[^<\n]{3,300})\s*<',
+        r'>\s*([^<\n]{3,500}\|[^<\n]{0,300}' + MEAS_KW + r'[^<\n]{0,300})\s*<',
+        r'(?:^|\n)([^\n<>]{5,600}' + MEAS_KW + r'[^\n<>]{3,500})\n',
+    ]:
+        rm = re.search(raw_pat, html, re.I)
+        if rm:
+            candidate = re.sub(r'\s+', ' ', rm.group(1)).strip()
+            if '|' in candidate and 10 < len(candidate) < 600:
+                # Normalize height in meters → cm: 1.68 → 168
+                def _norm_h(s):
+                    def rep(mo):
+                        try:
+                            fv = float(mo.group(1).replace(",", "."))
+                            if fv < 3.0: return f"Height {int(round(fv * 100))}"
+                        except: pass
+                        return mo.group(0)
+                    return re.sub(r'(?i)Height\s*:?\s*([0-9.,]+)', rep, s)
+                stats = _norm_h(candidate)
+                break
 
-    # Other fields — smart patterns that avoid false matches without requiring colon
-    extra_fields = [
-        # Bra: value must look like a bra size (A/B/C/D optionally with numbers) — avoids "Brazil"→"zil"
-        ("Bra",          [r'\bBra\s*:?\s*([A-Da-d][0-9/]*[A-Da-d]?[0-9]*)\b',
-                          r'\bBra\s*:?\s*([0-9]+[A-Da-d][0-9/]*)\b']),
-        # Shirt: only valid clothing sizes
-        ("Shirt",        [r'\bShirt\s*:?\s*(XXS|XS|S|M|L|XL|XXL|XXXL)(?:\b|[\s|])',
-                          r'\bShirt\s*:?\s*(xxs|xs|s|m|l|xl|xxl)(?:\b|[\s|])']),
-        # Pants: 2-digit waist number
-        ("Pants",        [r'\bPants\s*:?\s*(\d{2,3})(?:\b|[\s|])']),
-        # Shoe: 2-digit shoe size
-        ("Shoe",         [r'\bShoe[s]?\s*:?\s*(\d{2,3}[.,]?\d*)(?:\b|[\s|])']),
-        # Eye/Hair color: word after label
-        ("Eye Color",    [r'\bEye\s+Color\s*:?\s*(\w+)(?:\b|[\s|])']),
-        ("Hair Color",   [r'\bHair\s+Color\s*:?\s*(\w+)(?:\b|[\s|])']),
-        # Tattoos: yes/no only
-        ("Tattoos",      [r'\bTattoos?\s*:?\s*(yes|no|YES|NO)(?:\b|[\s|])']),
-        # Ear Piercings: numbers/plus sign
-        ("Ear Piercings",[r'\bEar\s+Piercings?\s*:?\s*([0-9][0-9+\-]*)(?:\b|[\s|])']),
-    ]
-    for lbl, patterns in extra_fields:
-        for pat in patterns:
+    # Fallback — build stats from individual field regex if raw line not found
+    if not stats:
+        found = {}
+        for pat in [r'[Hh]eight[\s:]*([0-9.,]+\s*(?:cm)?)', r'"height"\s*:\s*"([^"]+)"']:
             m = re.search(pat, html)
             if m:
                 val = m.group(1).strip().rstrip(".,")
-                if val and len(val) < 20:
-                    found[lbl] = val
-                    break
-
-    # Build ordered stats string
-    order = ["Height","Bust","Waist","Hips","Bra","Shirt","Pants","Shoe","Eye Color","Hair Color","Tattoos","Ear Piercings"]
-    parts = [f"{k}  {found[k]}" for k in order if k in found]
-    stats = "  |  ".join(parts)
+                try:
+                    fv = float(val.replace(",", ".").replace(" cm", ""))
+                    if fv < 3.0: val = str(int(round(fv * 100)))
+                except: pass
+                found["Height"] = val; break
+        for pat in [r'(?i)\bBust[\s:]*(\d+)', r'"bust"\s*:\s*"?(\d+)"?']:
+            m = re.search(pat, html)
+            if m: found["Bust"] = m.group(1); break
+        for pat in [r'(?i)\bWaist[\s:]*(\d+)', r'"waist"\s*:\s*"?(\d+)"?']:
+            m = re.search(pat, html)
+            if m: found["Waist"] = m.group(1); break
+        for pat in [r'(?i)\bHips?[\s:]*(\d+)', r'"hips"\s*:\s*"?(\d+)"?']:
+            m = re.search(pat, html)
+            if m: found["Hips"] = m.group(1); break
+        if not all(k in found for k in ("Bust","Waist","Hips")):
+            m = re.search(r'B[/\s]?W[/\s]?H[\s:]*(\d+)[/\s]+(\d+)[/\s]+(\d+)', html, re.I)
+            if m:
+                found.setdefault("Bust", m.group(1))
+                found.setdefault("Waist", m.group(2))
+                found.setdefault("Hips", m.group(3))
+        extra = [
+            ("Bra",          [r'\bBra\s*:?\s*([A-Da-d][0-9/]*[A-Da-d]?[0-9]*)\b',
+                               r'\bBra\s*:?\s*([0-9]+[A-Da-d][0-9/]*)\b']),
+            ("Shirt",        [r'(?i)\bShirt\s*:?\s*(XXS|XS|S|M|L|XL|XXL|XXXL)(?:\b|[\s|])']),
+            ("Pants",        [r'\bPants\s*:?\s*(\d{2,3})(?:\b|[\s|])']),
+            ("Shoe",         [r'(?i)\bShoes?\s*:?\s*(\d{2,3}[.,]?\d*)(?:\b|[\s|])']),
+            ("Eye Color",    [r'(?i)\bEye\s+Color\s*:?\s*(\w+)(?:\b|[\s|])',
+                               r'(?i)\bEyes?\s*:\s*(\w+)(?:\b|[\s|])']),
+            ("Hair Color",   [r'(?i)\bHair\s+Color\s*:?\s*(\w+)(?:\b|[\s|])',
+                               r'(?i)\bHair\s*:\s*(\w+)(?:\b|[\s|])']),
+            ("Tattoos",      [r'\bTattoos?\s*:?\s*(yes|no|YES|NO)(?:\b|[\s|])']),
+            ("Ear Piercings",[r'\bEar\s+Piercings?\s*:?\s*([0-9][0-9+\-]*)(?:\b|[\s|])']),
+        ]
+        for lbl, pats in extra:
+            for pat in pats:
+                m = re.search(pat, html)
+                if m:
+                    val = m.group(1).strip().rstrip(".,")
+                    if val and len(val) < 20: found[lbl] = val; break
+        order = ["Height","Bust","Waist","Hips","Bra","Shirt","Pants","Shoe",
+                 "Eye Color","Hair Color","Tattoos","Ear Piercings"]
+        parts = [f"{k}  {found[k]}" for k in order if k in found]
+        stats = "  |  ".join(parts)
 
     # Instagram
     insta = ""
@@ -206,12 +225,10 @@ def run_fetch():
                 raw[cat][slug] = data
                 _fetch_state["done"] += 1
 
-        # Build ordered output
         out = {}
         for cat, slugs in cat_slugs.items():
             out[cat] = [raw[cat][s] for s in slugs if s in raw[cat]]
 
-        # Add influencers
         out["INFLUENCERS"] = [{**inf, "slug": None} for inf in INFLUENCERS]
 
         _cache = {"data": out, "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -236,7 +253,7 @@ def fetch_img(url):
     return None
 
 def build_pdf(models, title=""):
-    W, H  = A4          # 595 x 842 pts
+    W, H  = A4
     M     = 10 * mm
 
     BG    = HexColor("#0A0A0A")
@@ -247,42 +264,36 @@ def build_pdf(models, title=""):
     DARK  = HexColor("#0F0F0F")
     DARK2 = HexColor("#161616")
 
-    HDR_H  = 22 * mm   # header strip
-    INFO_H = 80 * mm   # info strip at bottom
-    PHOTO_H = H - HDR_H - INFO_H   # photo fills the middle
+    HDR_H  = 22 * mm
+    INFO_H = 72 * mm
+    PHOTO_H = H - HDR_H - INFO_H
 
     buf = io.BytesIO()
     c   = rl.Canvas(buf, pagesize=A4)
     c.setTitle("IL Models Newsletter")
 
     def draw_page(model):
-        # ── Full background ──
+        # Full background
         c.setFillColor(BG)
         c.rect(0, 0, W, H, fill=1, stroke=0)
 
         # ── HEADER ──
-        # Gold top bar (3mm)
         c.setFillColor(GOLD)
         c.rect(0, H - 3*mm, W, 3*mm, fill=1, stroke=0)
-        # Header background
         c.setFillColor(DARK)
         c.rect(0, H - HDR_H, W, HDR_H - 3*mm, fill=1, stroke=0)
-        # Gold bottom line of header
         c.setFillColor(GOLD)
         c.rect(0, H - HDR_H, W, 0.6*mm, fill=1, stroke=0)
 
-        # Logo — "IL · MODELS"
         logo_y = H - HDR_H + 6*mm
         c.setFont("Helvetica-Bold", 17)
         c.setFillColor(WHITE)
         c.drawString(M, logo_y, "IL")
         c.setFillColor(GOLD)
-        c.setFont("Helvetica-Bold", 17)
         c.drawString(M + 19, logo_y, "·")
         c.setFillColor(WHITE)
         c.drawString(M + 28, logo_y, "MODELS")
 
-        # Custom title on the right
         hdr_right = title.upper() if title else time.strftime("Newsletter  ·  %B %Y").upper()
         c.setFont("Helvetica", 8)
         c.setFillColor(SILVER)
@@ -300,7 +311,7 @@ def build_pdf(models, title=""):
             c.setFillColor(SILVER); c.setFont("Helvetica", 14)
             c.drawCentredString(W/2, py + PHOTO_H/2, "No photo")
 
-        # Gradient overlay at photo bottom (dark fade into info strip)
+        # Gradient overlay at photo bottom
         steps = 18
         for i in range(steps):
             alpha = i / steps
@@ -311,7 +322,6 @@ def build_pdf(models, title=""):
             c.rect(0, py + i * band_h, W, band_h + 0.5, fill=1, stroke=0)
         c.setFillAlpha(1.0)
 
-        # Clickable photo → model page
         url = model.get("url", "")
         if url:
             c.linkURL(url, (0, py, W, py + PHOTO_H))
@@ -328,21 +338,27 @@ def build_pdf(models, title=""):
         c.setFillColor(WHITE)
         c.drawString(M, INFO_H - 13*mm, name[:32])
 
-        # Stats — split into rows of 4 items each
+        # ── Stats — single gold italic line ──
         raw = model.get("stats", "")
         stat_items = [s.strip() for s in raw.split("|") if s.strip()]
-        PER_ROW = 4
-        rows = [stat_items[i:i+PER_ROW] for i in range(0, len(stat_items), PER_ROW)]
+        full_line  = "   ·   ".join(stat_items)
 
-        c.setFont("Helvetica", 8)
-        c.setFillColor(SILVER)
-        stat_y = INFO_H - 21*mm
-        for row in rows[:4]:
-            line = "   |   ".join(row)
-            c.drawString(M, stat_y, line)
-            stat_y -= 5*mm
+        c.setFont("Helvetica-Oblique", 8.5)
+        c.setFillColor(GOLD)
 
-        # Instagram button
+        MAX_W  = W - 2 * M
+        stat_y = INFO_H - 22*mm
+
+        if c.stringWidth(full_line, "Helvetica-Oblique", 8.5) <= MAX_W:
+            c.drawString(M, stat_y, full_line)
+        else:
+            mid   = len(stat_items) // 2
+            line1 = "   ·   ".join(stat_items[:mid])
+            line2 = "   ·   ".join(stat_items[mid:])
+            c.drawString(M, stat_y, line1)
+            c.drawString(M, stat_y - 6*mm, line2)
+
+        # ── Instagram button ──
         insta = model.get("insta", "")
         if insta:
             handle = insta.lstrip("@")
@@ -351,13 +367,11 @@ def build_pdf(models, title=""):
             btn_x  = M
             btn_y  = 7*mm
 
-            # Instagram pink/purple background
             c.setFillColor(HexColor("#C13584"))
             c.roundRect(btn_x, btn_y, btn_w, btn_h, 2.5*mm, fill=1, stroke=0)
 
-            # Camera icon (simple rounded square outline)
-            ix = btn_x + 3.8*mm
-            iy = btn_y + 2.3*mm
+            ix  = btn_x + 3.8*mm
+            iy  = btn_y + 2.3*mm
             isz = 5.4*mm
             c.setStrokeColor(WHITE)
             c.setLineWidth(0.7)
@@ -367,16 +381,13 @@ def build_pdf(models, title=""):
             c.setFillColor(WHITE)
             c.circle(ix + isz - 1.2*mm, iy + isz - 1.2*mm, 0.45*mm, fill=1, stroke=0)
 
-            # Label
             c.setFont("Helvetica-Bold", 9)
             c.setFillColor(WHITE)
             c.drawString(btn_x + 12*mm, btn_y + 3.3*mm, f"Instagram   @{handle}")
-
-            # Link
             c.linkURL(f"https://instagram.com/{handle}",
                       (btn_x, btn_y, btn_x + btn_w, btn_y + btn_h))
 
-        # Page URL hint bottom-right
+        # ilmodel.com hint
         c.setFont("Helvetica", 7)
         c.setFillColor(HexColor("#444"))
         c.drawRightString(W - M, 3.5*mm, "ilmodel.com")
@@ -403,11 +414,11 @@ def api_models():
 @app.route("/api/status")
 def api_status():
     return jsonify({
-        "running":     _fetch_state["running"],
-        "done":        _fetch_state["done"],
-        "total":       _fetch_state["total"],
-        "has_data":    _cache is not None,
-        "fetched_at":  _cache.get("fetched_at") if _cache else None,
+        "running":    _fetch_state["running"],
+        "done":       _fetch_state["done"],
+        "total":      _fetch_state["total"],
+        "has_data":   _cache is not None,
+        "fetched_at": _cache.get("fetched_at") if _cache else None,
     })
 
 @app.route("/api/refresh")
