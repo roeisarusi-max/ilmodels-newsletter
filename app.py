@@ -115,7 +115,7 @@ def extract_page(html, slug):
         ("Eye Color",     [r'[Ee]ye\s*[Cc]olor\s*:\s*(\w+)', r'"eyeColor"\s*:\s*"([^"]+)"']),
         ("Hair Color",    [r'[Hh]air\s*[Cc]olor\s*:\s*(\w+)', r'"hairColor"\s*:\s*"([^"]+)"']),
         ("Tattoos",       [r'[Tt]attoos?\s*:\s*(\w+)']),
-        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?\s*:\s*([0-9A-Za-z+\-]+)']),
+        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?\s*:\s*([0-9A-Za-z+\-]+']),
     ]
     for lbl, patterns in extra_fields:
         for pat in patterns:
@@ -406,22 +406,6 @@ def api_refresh():
     if not _fetch_state["running"]:
         threading.Thread(target=run_fetch, daemon=True).start()
     return jsonify({"status": "started"})
-
-@app.route("/api/img")
-def api_img():
-    """Proxy images from Squarespace CDN to avoid hotlink blocking."""
-    url = request.args.get("u", "")
-    if not url.startswith("https://images.squarespace-cdn.com/"):
-        return "", 400
-    try:
-        r = req.get(url, headers={**UA, "Referer": "https://www.ilmodel.com/"}, timeout=10, stream=True)
-        if r.ok:
-            resp = make_response(r.content)
-            resp.headers["Content-Type"]  = r.headers.get("Content-Type", "image/jpeg")
-            resp.headers["Cache-Control"] = "public, max-age=86400"
-            return resp
-    except: pass
-    return "", 404
 
 @app.route("/api/model-photos/<slug>")
 def api_model_photos(slug):
