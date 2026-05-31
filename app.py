@@ -106,25 +106,34 @@ def extract_page(html, slug):
             found.setdefault("Waist", m.group(2))
             found.setdefault("Hips",  m.group(3))
 
-    # Other fields — require colon separator to avoid false matches (e.g. "Brazil" → "Bra: zil")
+    # Other fields — smart patterns that avoid false matches without requiring colon
     extra_fields = [
-        ("Bra",           [r'[Bb]ra\s*:\s*([A-Za-z0-9/]+)', r'"bra"\s*:\s*"([^"]+)"']),
-        ("Shirt",         [r'[Ss]hirt\s*:\s*([A-Za-z0-9]+)', r'"shirt"\s*:\s*"([^"]+)"']),
-        ("Pants",         [r'[Pp]ants\s*:\s*(\d+)', r'"pants"\s*:\s*"?(\d+)"?']),
-        ("Shoe",          [r'[Ss]hoe[s]?\s*:\s*(\d+[.,]?\d*)', r'[Ss]hoes?\s*:\s*(\d+[.,]?\d*)']),
-        ("Eye Color",     [r'[Ee]ye\s*[Cc]olor\s*:\s*(\w+)', r'"eyeColor"\s*:\s*"([^"]+)"']),
-        ("Hair Color",    [r'[Hh]air\s*[Cc]olor\s*:\s*(\w+)', r'"hairColor"\s*:\s*"([^"]+)"']),
-        ("Tattoos",       [r'[Tt]attoos?\s*:\s*(\w+)']),
-        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?\s*:\s*([0-9A-Za-z+\-]+']),
+        # Bra: value must look like a bra size (A/B/C/D optionally with numbers) — avoids "Brazil"→"zil"
+        ("Bra",          [r'\bBra\s*:?\s*([A-Da-d][0-9/]*[A-Da-d]?[0-9]*)\b',
+                          r'\bBra\s*:?\s*([0-9]+[A-Da-d][0-9/]*)\b']),
+        # Shirt: only valid clothing sizes
+        ("Shirt",        [r'\bShirt\s*:?\s*(XXS|XS|S|M|L|XL|XXL|XXXL)(?:\b|[\s|])',
+                          r'\bShirt\s*:?\s*(xxs|xs|s|m|l|xl|xxl)(?:\b|[\s|])']),
+        # Pants: 2-digit waist number
+        ("Pants",        [r'\bPants\s*:?\s*(\d{2,3})(?:\b|[\s|])']),
+        # Shoe: 2-digit shoe size
+        ("Shoe",         [r'\bShoe[s]?\s*:?\s*(\d{2,3}[.,]?\d*)(?:\b|[\s|])']),
+        # Eye/Hair color: word after label
+        ("Eye Color",    [r'\bEye\s+Color\s*:?\s*(\w+)(?:\b|[\s|])']),
+        ("Hair Color",   [r'\bHair\s+Color\s*:?\s*(\w+)(?:\b|[\s|])']),
+        # Tattoos: yes/no only
+        ("Tattoos",      [r'\bTattoos?\s*:?\s*(yes|no|YES|NO)(?:\b|[\s|])']),
+        # Ear Piercings: numbers/plus sign
+        ("Ear Piercings",[r'\bEar\s+Piercings?\s*:?\s*([0-9][0-9+\-]*)(?:\b|[\s|])']),
     ]
     for lbl, patterns in extra_fields:
         for pat in patterns:
             m = re.search(pat, html)
             if m:
                 val = m.group(1).strip().rstrip(".,")
-                if val and len(val) < 30:  # sanity check
+                if val and len(val) < 20:
                     found[lbl] = val
-                break
+                    break
 
     # Build ordered stats string
     order = ["Height","Bust","Waist","Hips","Bra","Shirt","Pants","Shoe","Eye Color","Hair Color","Tattoos","Ear Piercings"]
@@ -406,6 +415,22 @@ def api_refresh():
     if not _fetch_state["running"]:
         threading.Thread(target=run_fetch, daemon=True).start()
     return jsonify({"status": "started"})
+
+@app.route("/api/img")
+def api_img():
+    """Proxy images from Squarespace CDN to avoid hotlink blocking."""
+    url = request.args.get("u", "")
+    if not url.startswith("https://images.squarespace-cdn.com/"):
+        return "", 400
+    try:
+        r = req.get(url, headers={**UA, "Referer": "https://www.ilmodel.com/"}, timeout=10, stream=True)
+        if r.ok:
+            resp = make_response(r.content)
+            resp.headers["Content-Type"]  = r.headers.get("Content-Type", "image/jpeg")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
+    except: pass
+    return "", 404
 
 @app.route("/api/model-photos/<slug>")
 def api_model_photos(slug):
