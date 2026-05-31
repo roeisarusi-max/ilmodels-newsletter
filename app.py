@@ -14,8 +14,8 @@ def _install(pkg):
 try: import requests as req
 except ImportError: _install("requests"); import requests as req
 
-try: from reportlab.pdfgen import canvas as rl; from reportlab.lib.pagesizes import A4; from reportlab.lib.colors import HexColor; from reportlab.lib.units import mm; PDF_OK = True
-except ImportError: _install("reportlab"); from reportlab.pdfgen import canvas as rl; from reportlab.lib.pagesizes import A4; from reportlab.lib.colors import HexColor; from reportlab.lib.units import mm; PDF_OK = True
+try: from reportlab.pdfgen import canvas as rl; from reportlab.lib.pagesizes import A4; from reportlab.lib.colors import HexColor; from reportlab.lib.units import mm; from reportlab.lib.utils import ImageReader; PDF_OK = True
+except ImportError: _install("reportlab"); from reportlab.pdfgen import canvas as rl; from reportlab.lib.pagesizes import A4; from reportlab.lib.colors import HexColor; from reportlab.lib.units import mm; from reportlab.lib.utils import ImageReader; PDF_OK = True
 
 try: from PIL import Image as PILImage; PIL_OK = True
 except ImportError: _install("pillow"); from PIL import Image as PILImage; PIL_OK = True
@@ -241,7 +241,7 @@ def build_pdf(models):
         px, py = x+2*mm, y+CARD_H-PH-2*mm
         img = fetch_img(model.get("photo_url") or model.get("thumb",""))
         if img:
-            c.drawImage(img, px, py, width=CW-4*mm, height=PH, preserveAspectRatio=True, anchor="n", mask="auto")
+            c.drawImage(ImageReader(img), px, py, width=CW-4*mm, height=PH, preserveAspectRatio=True, anchor="n", mask="auto")
         else:
             c.setFillColor(HexColor("#222")); c.rect(px, py, CW-4*mm, PH, fill=1, stroke=0)
             c.setFillColor(SILVER); c.setFont("Helvetica",8); c.drawCentredString(x+CW/2, y+CARD_H/2, "No photo")
