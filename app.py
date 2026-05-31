@@ -106,22 +106,24 @@ def extract_page(html, slug):
             found.setdefault("Waist", m.group(2))
             found.setdefault("Hips",  m.group(3))
 
-    # Other fields
+    # Other fields — require colon separator to avoid false matches (e.g. "Brazil" → "Bra: zil")
     extra_fields = [
-        ("Bra",           [r'[Bb]ra[\s:]*([A-Za-z0-9/]+)', r'"bra"\s*:\s*"([^"]+)"']),
-        ("Shirt",         [r'[Ss]hirt[\s:]*([A-Za-z0-9]+)', r'"shirt"\s*:\s*"([^"]+)"']),
-        ("Pants",         [r'[Pp]ants[\s:]*(\d+)', r'"pants"\s*:\s*"?(\d+)"?']),
-        ("Shoe",          [r'[Ss]hoe[s]?[\s:]*(\d+[.,]?\d*)', r'"shoe[s]?"\s*:\s*"?(\d+)"?']),
-        ("Eye Color",     [r'[Ee]ye\s*[Cc]olor[\s:]*(\w+)', r'"eyeColor"\s*:\s*"([^"]+)"']),
-        ("Hair Color",    [r'[Hh]air\s*[Cc]olor[\s:]*(\w+)', r'"hairColor"\s*:\s*"([^"]+)"']),
-        ("Tattoos",       [r'[Tt]attoos?[\s:]*(\w+)']),
-        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?[\s:]*([0-9A-Za-z+\-]+)']),
+        ("Bra",           [r'[Bb]ra\s*:\s*([A-Za-z0-9/]+)', r'"bra"\s*:\s*"([^"]+)"']),
+        ("Shirt",         [r'[Ss]hirt\s*:\s*([A-Za-z0-9]+)', r'"shirt"\s*:\s*"([^"]+)"']),
+        ("Pants",         [r'[Pp]ants\s*:\s*(\d+)', r'"pants"\s*:\s*"?(\d+)"?']),
+        ("Shoe",          [r'[Ss]hoe[s]?\s*:\s*(\d+[.,]?\d*)', r'[Ss]hoes?\s*:\s*(\d+[.,]?\d*)']),
+        ("Eye Color",     [r'[Ee]ye\s*[Cc]olor\s*:\s*(\w+)', r'"eyeColor"\s*:\s*"([^"]+)"']),
+        ("Hair Color",    [r'[Hh]air\s*[Cc]olor\s*:\s*(\w+)', r'"hairColor"\s*:\s*"([^"]+)"']),
+        ("Tattoos",       [r'[Tt]attoos?\s*:\s*(\w+)']),
+        ("Ear Piercings", [r'[Ee]ar\s*[Pp]iercings?\s*:\s*([0-9A-Za-z+\-]+']),
     ]
     for lbl, patterns in extra_fields:
         for pat in patterns:
             m = re.search(pat, html)
             if m:
-                found[lbl] = m.group(1).strip().rstrip(".,")
+                val = m.group(1).strip().rstrip(".,")
+                if val and len(val) < 30:  # sanity check
+                    found[lbl] = val
                 break
 
     # Build ordered stats string
