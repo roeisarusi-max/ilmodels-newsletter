@@ -428,6 +428,10 @@ def _embed_cors(resp):
 @app.route("/embed.js")
 def embed_js():
     base = request.url_root.rstrip("/")
+    # Behind Railway's proxy the app sees plain http; the public URL is https.
+    # An http:// asset inside an https:// page is blocked as mixed content.
+    if base.startswith("http://") and request.headers.get("X-Forwarded-Proto") == "https":
+        base = "https://" + base[len("http://"):]
     html = render_template("index.html")
 
     styles = re.findall(r"<style[^>]*>(.*?)</style>", html, re.S | re.I)
