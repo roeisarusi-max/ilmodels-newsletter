@@ -459,8 +459,11 @@ def embed_js():
     # under the site's own header and covers the first row. In the embed it
     # should simply flow. position:fixed is left alone on purpose — the Preview
     # overlay relies on it to cover the screen.
-    css = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:relative", css, flags=re.I)
-    body = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:relative", body, flags=re.I)
+    # Use static, not relative: these bars carry a top offset (e.g. top:56px)
+    # for their pinned position, and under relative that offset would shove the
+    # bar down over the first row of cards. Under static the offset is ignored.
+    css = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:static", css, flags=re.I)
+    body = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:static", body, flags=re.I)
     # Anything that used to float over the viewport now sits in normal flow at
     # the very top, so the mount needs the app's dark ground (white-on-white
     # text would otherwise be invisible) and a little breathing room.
@@ -525,8 +528,14 @@ def embed_js():
     }
     document.addEventListener = patch(dAdd);
     window.addEventListener = patch(wAdd);
-    try { (new Function(D.js))(); }
-    catch (e) { console.error("[embed] script error", e); }
+    try {
+      // Run in GLOBAL scope, not inside a function: the markup uses inline
+      // onclick="..." handlers, which can only reach functions defined
+      // globally. A <script> element with textContent executes synchronously.
+      var sc = document.createElement("script");
+      sc.textContent = D.js;
+      document.head.appendChild(sc);
+    } catch (e) { console.error("[embed] script error", e); }
     document.addEventListener = dAdd;
     window.addEventListener = wAdd;
     if (typeof window.onload === "function") { try { window.onload(); } catch (e) {} }
