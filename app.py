@@ -461,8 +461,13 @@ def embed_js():
     body = re.sub(r"position\s*:\s*(?:fixed|sticky)", "position:relative", body, flags=re.I)
     # Viewport-height boxes would fight the host page's own scrolling.
     css = re.sub(r"(?i)\b(min-height|height)\s*:\s*100vh", r"\1:auto", css)
-    css += ("\n#" + EMBED_MOUNT + "{position:relative;overflow:visible;"
-            "max-width:100%;margin:0 auto}\n")
+    # Anything that used to float over the viewport now sits in normal flow at
+    # the very top, so the mount needs the app's dark ground (white-on-white
+    # text would otherwise be invisible) and a little breathing room.
+    bgm = re.search(r"(?is)\bbody\s*\{[^}]*background(?:-color)?\s*:\s*([^;}]+)", "\n".join(styles))
+    page_bg = bgm.group(1).strip() if bgm else "#0b0b0b"
+    css += ("\n#" + EMBED_MOUNT + "{position:relative;overflow:visible;max-width:100%;"
+            "margin:0 auto;background:" + page_bg + ";padding-top:18px}\n")
     css = absolutize(css)
 
     payload = {
