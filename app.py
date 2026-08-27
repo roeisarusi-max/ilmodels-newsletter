@@ -455,6 +455,14 @@ def embed_js():
     css = "\n".join(styles)
     css = re.sub(r"(?im)^[ \t]*(?:html|body)[ \t]*(?:,[ \t]*(?:html|body)[ \t]*)*\{",
                  "#" + EMBED_MOUNT + "{", css)
+    # Inside a host page, a fixed/sticky bar anchors to the browser window and
+    # slides under the site's own header. In the embed it should just flow.
+    css = re.sub(r"position\s*:\s*(?:fixed|sticky)", "position:relative", css, flags=re.I)
+    body = re.sub(r"position\s*:\s*(?:fixed|sticky)", "position:relative", body, flags=re.I)
+    # Viewport-height boxes would fight the host page's own scrolling.
+    css = re.sub(r"(?i)\b(min-height|height)\s*:\s*100vh", r"\1:auto", css)
+    css += ("\n#" + EMBED_MOUNT + "{position:relative;overflow:visible;"
+            "max-width:100%;margin:0 auto}\n")
     css = absolutize(css)
 
     payload = {
