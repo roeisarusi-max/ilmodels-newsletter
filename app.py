@@ -455,12 +455,12 @@ def embed_js():
     css = "\n".join(styles)
     css = re.sub(r"(?im)^[ \t]*(?:html|body)[ \t]*(?:,[ \t]*(?:html|body)[ \t]*)*\{",
                  "#" + EMBED_MOUNT + "{", css)
-    # Inside a host page, a fixed/sticky bar anchors to the browser window and
-    # slides under the site's own header. In the embed it should just flow.
-    css = re.sub(r"position\s*:\s*(?:fixed|sticky)", "position:relative", css, flags=re.I)
-    body = re.sub(r"position\s*:\s*(?:fixed|sticky)", "position:relative", body, flags=re.I)
-    # Viewport-height boxes would fight the host page's own scrolling.
-    css = re.sub(r"(?i)\b(min-height|height)\s*:\s*100vh", r"\1:auto", css)
+    # A sticky bar pins to the browser window, so inside a host page it slides
+    # under the site's own header and covers the first row. In the embed it
+    # should simply flow. position:fixed is left alone on purpose — the Preview
+    # overlay relies on it to cover the screen.
+    css = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:relative", css, flags=re.I)
+    body = re.sub(r"position\s*:\s*(?:-webkit-)?sticky", "position:relative", body, flags=re.I)
     # Anything that used to float over the viewport now sits in normal flow at
     # the very top, so the mount needs the app's dark ground (white-on-white
     # text would otherwise be invisible) and a little breathing room.
