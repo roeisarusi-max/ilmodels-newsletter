@@ -478,7 +478,7 @@ def embed_js():
         "srcs": [s if s.startswith("http") else base + "/" + s.lstrip("/") for s in srcs],
     }
 
-    runtime = """
+    runtime = r"""
   var m = document.getElementById(D.mount);
   if (!m) {
     m = document.createElement("div");
@@ -491,6 +491,24 @@ def embed_js():
   st.textContent = D.css;
   document.head.appendChild(st);
   m.innerHTML = D.html;
+
+  // The host site already shows the agency logo in its own header, so the
+  // app's "IL MODELS" wordmark is a duplicate here — hide it in the embed.
+  try {
+    var all = m.querySelectorAll("*");
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.children.length) continue;
+      var t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!/^IL\s*[·:.•-]?\s*MODELS$/i.test(t)) continue;
+      var target = el;
+      while (target.parentNode && target.parentNode !== m &&
+             (target.parentNode.textContent || "").replace(/\s+/g, " ").trim() === t) {
+        target = target.parentNode;
+      }
+      target.style.display = "none";
+    }
+  } catch (e) { console.error("[embed] brand hide", e); }
 
   function runInline() {
     var dAdd = document.addEventListener.bind(document);
