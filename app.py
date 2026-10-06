@@ -557,6 +557,26 @@ def embed_js():
                     headers={"Access-Control-Allow-Origin": "*",
                              "Cache-Control": "public, max-age=60"})
 
+# ── Work order form (הזמנת עבודה) ─────────────────────────────────────────────
+# Standalone page: /order . Everything runs in the browser; nothing is stored here.
+from flask import send_file
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.route("/order")
+@app.route("/order/")
+def order_page():
+    resp = make_response(send_file(os.path.join(_HERE, "order.html"), mimetype="text/html"))
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
+@app.route("/order-icon.png")
+def order_icon():
+    return send_file(os.path.join(_HERE, "order-icon.png"), mimetype="image/png", max_age=86400)
+
+
 # ── Start ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"🚀 Starting on port {PORT}")
